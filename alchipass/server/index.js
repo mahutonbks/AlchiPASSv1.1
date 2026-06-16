@@ -10,10 +10,12 @@ import salariesRouter  from './routes/salaries.js'
 import pointagesRouter from './routes/pointages.js'
 import casquesRouter   from './routes/casques.js'
 import miscRouter      from './routes/misc.js'
+import { creerRouterHardware } from './routes/hardware.js'
 import { demarrerBadgeuse, creerHandlerBadgeuse } from './hardware/badgeuse.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const PORT = process.env.PORT || 3001
+// Port 3000 par défaut pour compatibilité avec le script Python du Raspberry Pi
+const PORT = process.env.PORT || 3000
 
 const app    = express()
 const server = createServer(app)
@@ -30,6 +32,7 @@ app.use('/api/salaries',   salariesRouter)
 app.use('/api/pointages',  pointagesRouter)
 app.use('/api/casques',    casquesRouter)
 app.use('/api',            miscRouter)
+app.use('/api',            creerRouterHardware(io))
 
 // Route login admin
 app.post('/api/admin/login', (req, res) => {
@@ -68,7 +71,8 @@ io.on('connection', (socket) => {
 server.listen(PORT, '0.0.0.0', async () => {
   console.log(`\n AlchiPass backend demarre sur le port ${PORT}`)
   console.log(`   API  : http://localhost:${PORT}/api`)
-  console.log(`   App  : http://localhost:${PORT}\n`)
+  console.log(`   App  : http://localhost:${PORT}`)
+  console.log(`   Pi   : http://10.115.166.244:${PORT}\n`)
 
   // Lance le workflow complet (RFID + Keypad EPI + DB + Socket.io)
   const hardwareDispo = await demarrerBadgeuse(io)

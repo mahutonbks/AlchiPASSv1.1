@@ -6,6 +6,7 @@ NOM DU PROJET : AlchiPass
 EQUIPE        : Groupe 16
 CLIENT        : Les Alchimistes Cote d'Azur
 OBJET         : Pointage numerique des heures (remplace le papier)
+PI IP         : 10.115.166.244
 
 -----------------------------------------------------------
 1. TECHNOLOGIES UTILISEES
@@ -16,11 +17,12 @@ Frontend :
   - React Router 6 (navigation entre les ecrans)
   - socket.io-client (reception RFID + confirmations badgeuse en temps reel)
   - Langage : JavaScript (JSX), CSS pur
+  - Responsive mobile (media query max-width: 640px)
 
 Backend (Raspberry Pi) :
   - Node.js + Express 4 (serveur REST)
   - Socket.io 4 (push RFID et confirmations vers les navigateurs)
-  - better-sqlite3 v12 (base de donnees locale, API synchrone)
+  - better-sqlite3 v12 (base de donnees locale, API synchrone, WAL mode)
 
 Hardware (optionnel, Raspberry Pi uniquement) :
   - mfrc522-rpi + rpi-softspi (lecteur RFID RC522 via SPI)
@@ -44,7 +46,7 @@ Hardware (optionnel, Raspberry Pi uniquement) :
 
   Terminal 1 - backend :
     npm install        (une seule fois)
-    npm run server     (lance Express + Socket.io + SQLite sur :3001)
+    npm run server     (lance Express + Socket.io + SQLite sur :3000)
 
   Terminal 2 - frontend :
     npm run dev        (Vite avec proxy API, accessible sur :5173)
@@ -57,13 +59,22 @@ Hardware (optionnel, Raspberry Pi uniquement) :
   - Utilisez le bouton "sim:badge" dans /kiosque pour simuler un badge
   - Le workflow complet est execute : identification -> EPI -> enregistrement BDD
 
+  Developper contre le Raspberry Pi :
+    Creer le fichier .env.local a la racine du projet avec :
+      VITE_API_TARGET=http://10.115.166.244:3000
+    Puis relancer "npm run dev" — le proxy Vite pointe vers le Pi.
+
 >>> PRODUCTION (Raspberry Pi) <<<
 
   npm install         (installe aussi les paquets GPIO natifs)
-  npm start           (build le frontend puis lance le serveur)
+  npm start           (build le frontend puis lance le serveur sur :3000)
 
-  L'application est ensuite accessible sur http://<IP_DU_PI>:3001
+  L'application est ensuite accessible sur http://10.115.166.244:3000
   depuis tous les appareils du reseau (tablettes, PC, telephones).
+
+  Note port : le serveur ecoute sur le port 3000 par defaut.
+  Cela correspond a URL_BASE = 'http://127.0.0.1:3000/api' dans
+  le script Python du Pi. Pour changer : PORT=3001 npm start
 
   Pour un demarrage automatique au boot :
     pm2 start ecosystem.config.cjs  (avec PM2)
@@ -71,6 +82,10 @@ Hardware (optionnel, Raspberry Pi uniquement) :
     sudo cp alchipass.service /etc/systemd/system/
     sudo systemctl enable alchipass
     sudo systemctl start alchipass  (avec systemd)
+
+  Activer SPI pour le RC522 :
+    sudo raspi-config -> Interface Options -> SPI -> Enable
+    Verifier : ls /dev/spidev*  (doit afficher /dev/spidev0.0)
 
 -----------------------------------------------------------
 4. COMPTES DE DEMONSTRATION
@@ -93,12 +108,14 @@ Salaries OPERATEUR (pause uniquement via badgeuse physique) :
 index.html                  Page hote
 package.json                Dependances et scripts npm
 vite.config.js              Config Vite + proxy /api et /socket.io
+                            (cible via VITE_API_TARGET dans .env.local)
+.env.example                Exemple de variables d'environnement
 ecosystem.config.cjs        Config PM2 (production)
 alchipass.service           Unite systemd (production)
 alchipass.db                Base SQLite (generee au premier lancement)
 
 server/
-  index.js                  Serveur Express + Socket.io (port 3001)
+  index.js                  Serveur Express + Socket.io (port 3000)
   database.js               Schema SQLite + seed de demonstration
   routes/
     salaries.js             CRUD salaries & sites, login admin
@@ -106,7 +123,12 @@ server/
     pointages.js            CRUD badgeages — verification role COLLECTEUR
                             pour pauses distantes (origine: 'app')
     casques.js              CRUD casques RFID, associations, badges managers
-    misc.js                 Pauses, planning, signalements EPI
+    misc.js                 Pauses, planning, signalements EPI, feedbacks
+    hardware.js             Bridge API pour script Python Pi :
+                              POST /api/badge
+                              POST /api/authentifier
+                              POST /api/evenement
+                              GET  /api/historique
   hardware/
     badgeuse.js             Orchestrateur physique : RFID + Digicode EPI
                             + enregistrement BDD + emission Socket.io
@@ -116,20 +138,19 @@ server/
 src/
   main.jsx                  Point d'entree React + routeur
   App.jsx                   Definition des routes
-  styles.css                Feuille de style (identite visuelle)
+  styles.css                Feuille de style responsive (mobile <= 640px)
   context/
-    AppContext.jsx          Etat global + appels API REST
-                            + refresh via evenement alchipass:refresh
+    AppContext.jsx          Etat global + appels API REST + feedbacks
   pages/
     Accueil.jsx             Ecran d'entree (choix du mode)
     Kiosque.jsx             Application personnelle employe
-                              Login -> Dashboard -> Planning -> Historique
-                              Bouton pause : visible uniquement pour COLLECTEUR
-                              Socket.io : rfid:badge, badgeuse:confirme,
-                                          pointages:refresh
+                              Login : liste boutons compatible Android
+                              Dashboard -> Planning -> Historique
+                              FeedbackJournee (note 1-5 etoiles apres depart)
+                              Socket.io : rfid:badge, badgeuse:confirme
     AdminConnexion.jsx      Connexion RH / Admin
     Admin.jsx               Espace manager (vue RH ou securite)
-                              GestionSalaries : selecteur role COLLECTEUR/OPERATEUR
+                              VueFeedbacks : notes + commentaires + KPIs
   components/
     Communs.jsx             Logo, horloge temps reel, en-tete
   utils/
@@ -138,7 +159,7 @@ src/
     rapports.js             Agregation des heures, anomalies, export CSV
 
 -----------------------------------------------------------
-6. FLUX DE POINTAGE RFID (BADGEUSE PHYSIQUE)
+6. FLUX DE POINTAGE RFID (BADGEUSE NODE.JS - CHEMIN A)
 -----------------------------------------------------------
 1. Le RC522 sur le Pi detecte un badge (uid hex).
 2. server/hardware/rfid.js remonte l'UID via demarrerPolling().
@@ -157,7 +178,76 @@ src/
 4. Badge manager : io.emit('rfid:badge', { manager: true }) -> redirection admin
 
 -----------------------------------------------------------
-7. REGLES METIER PAUSES
+7. BRIDGE API SCRIPT PYTHON (CHEMIN B)
+-----------------------------------------------------------
+Le script Python du Pi (URL_BASE = 'http://127.0.0.1:3000/api') peut
+communiquer avec le serveur via ces endpoints :
+
+POST /api/badge
+  Corps   : { uid: "390476793230" }
+  Reponse : { role: "OUVRIER" | "ADMIN" | "RH" | "INCONNU", nom, salarieId }
+  Action  : identifie le badge (manager ou casque salarie), emet rfid:badge
+
+POST /api/authentifier
+  Corps   : { password: "1234" }
+  Reponse : { status: "OK", nom, salarieId } | { status: "ERREUR" }
+  Action  : verifie le code PIN dans la table salaries
+
+POST /api/evenement
+  Corps   : { action, ouvrier, uid_casque, uid, nom, etape }
+  Reponse : { status: "OK" }
+  Actions gerees :
+    CASQUE_OK/NOK, GILET_OK/NOK  -> accumulation EPI en session memoire
+    CHAUSSURES_OK/NOK            -> mappe vers "bottes" dans notre schema
+    CONNEXION_CASQUE_VALIDE      -> INSERT Arrivee + io.emit badgeuse:confirme
+    FIN_VALIDATION_OK            -> idem
+    DECONNEXION_OUVRIER          -> INSERT Depart  + io.emit badgeuse:confirme
+    CONNEXION_ADMIN/RH           -> io.emit rfid:badge (dashboard)
+    ECHEC_VALIDATION_EPI         -> pas de pointage, nettoyage session EPI
+
+GET /api/historique
+  Reponse : 200 derniers pointages { type, salarieId, date, origine }
+
+-----------------------------------------------------------
+8. FEEDBACK JOURNEE
+-----------------------------------------------------------
+Apres le pointage de depart d'un salarie :
+- L'ecran de confirmation reste 2 secondes
+- Puis l'ecran de feedback s'affiche (FeedbackJournee dans Kiosque.jsx)
+- Le salarie peut donner une note de 1 a 5 etoiles
+  (label anime : Journee difficile -> Excellente journee)
+- Un champ commentaire apparait si une note est selectionnee
+- Bouton "Envoyer" (desactive si note = 0) + bouton "Passer"
+- La soumission appelle POST /api/feedbacks et restaure la session
+- Les feedbacks sont visibles dans Admin -> Feedbacks salaries :
+  tableau notes/commentaires, filtrage par salarie, KPIs (total, moyenne)
+
+-----------------------------------------------------------
+9. SELECTEUR EMPLOYE ANDROID-COMPATIBLE
+-----------------------------------------------------------
+Le <select> natif HTML cause des problemes sur Android WebView :
+  - Les emojis dans les <option> ne s'affichent pas correctement
+  - Le onChange n'est pas toujours declenche
+
+Remplacement : liste de <button> dans un div scrollable
+  - .login-liste : conteneur avec overflow-y: auto, -webkit-overflow-scrolling
+  - Chaque bouton affiche avatar + prenom nom + fleche >
+  - Clic -> selecte le salarie, affiche le clavier PIN
+  - Bouton "Changer" pour revenir a la liste
+
+-----------------------------------------------------------
+10. RESPONSIVE MOBILE
+-----------------------------------------------------------
+Media query @media (max-width: 640px) :
+  - Header kiosque : masque la date (seule l'heure reste visible)
+  - Grilles formulaires : passage a 1 colonne (grid-template-columns: 1fr)
+  - Actions de pointage : colonne unique
+  - .carte : overflow-x: auto pour les tableaux larges
+  - Police horloge reduite
+  - Sidebar Admin/RH : mini (64px icones) a partir de 900px
+
+-----------------------------------------------------------
+11. REGLES METIER PAUSES
 -----------------------------------------------------------
 COLLECTEUR :
   - Bouton "Prendre ma pause" visible dans le dashboard mobile
@@ -173,7 +263,7 @@ OPERATEUR :
 Attribution des roles : Espace Admin -> Salaries -> Modifier -> champ "Role"
 
 -----------------------------------------------------------
-8. EVENEMENTS SOCKET.IO
+12. EVENEMENTS SOCKET.IO
 -----------------------------------------------------------
 rfid:badge        Server -> Client   UID badge detecte (manager ou simulation)
 sim:badge         Client -> Server   Simulation badge depuis le navigateur (dev)
@@ -182,10 +272,76 @@ badgeuse:confirme Server -> Client   Pointage physique enregistre
 pointages:refresh Server -> Client   Signal rechargement liste pointages
 
 -----------------------------------------------------------
-9. POINTS TECHNIQUES NOTABLES
+13. TABLES DE LA BASE SQLITE
+-----------------------------------------------------------
+sites                  Sites geographiques
+salaries               Employes (code_pin, site_id, heures_hebdo, ROLE)
+                       role : 'OPERATEUR' (defaut) | 'COLLECTEUR'
+casques                Stickers RFID RC522 (uid_rfid, num interne)
+badges_managers        Badges RH/admin (uid_rfid, role)
+associations_journ.    Casque du jour (salarie <-> sticker)
+badgeages_reels        Pointages (type_evenement, timestamp, EPI, origine,
+                       heure_corrigee, modifications)
+                       origine : 'badgeuse' | 'badgeuse-pi' | 'app' | 'correction'
+feedbacks              Notes journee employe (id_salarie, date, note 1-5,
+                       commentaire, timestamp)
+epi_renouvellements    Signalements equipements a renouveler
+planning               Horaires previsionnels par salarie
+pauses_defaut          Pauses collectives (matin 10h30, midi 12h30)
+admin_comptes          Comptes rh et admin
+
+-----------------------------------------------------------
+14. API REST - RESUME
+-----------------------------------------------------------
+Salaries & sites :
+  GET    /api/salaries
+  POST   /api/salaries
+  PUT    /api/salaries/:id
+  PATCH  /api/salaries/:id/actif
+  GET    /api/salaries/sites
+  POST   /api/admin/login
+
+Pointages :
+  GET    /api/pointages
+  POST   /api/pointages         { salarieId, type, epiData, origine }
+  PUT    /api/pointages/:id     { nouveauTimestamp, auteur }
+  POST   /api/pointages/manuel  { salarieId, type, timestamp, auteur }
+  DELETE /api/pointages/:id
+
+Casques & RFID :
+  GET/POST/PUT/DELETE /api/casques
+  GET/POST/DELETE     /api/casques/associations
+  GET/POST/DELETE     /api/casques/badges-managers
+
+Pauses, planning, signalements :
+  GET/PUT  /api/pauses/:id
+  GET/PUT  /api/planning/:salarieId
+  GET/POST /api/signalements
+  PATCH    /api/signalements/:id/traite
+
+Feedbacks :
+  GET  /api/feedbacks
+  POST /api/feedbacks         { salarieId, note, commentaire }
+
+Hardware bridge (script Python Pi) :
+  POST /api/badge             { uid }
+  POST /api/authentifier      { password }
+  POST /api/evenement         { action, ouvrier, uid_casque, ... }
+  GET  /api/historique
+
+-----------------------------------------------------------
+15. POINTS TECHNIQUES NOTABLES
 -----------------------------------------------------------
 - Orchestrateur badgeuse.js : RFID + Digicode + SQLite + Socket.io en un seul
   module. Fallback simulation complet si GPIO non disponibles (PC).
+- Hardware bridge hardware.js : les 3 endpoints Pi accumulent les EPI en
+  memoire entre les appels. Pointage cree uniquement a CONNEXION_CASQUE_VALIDE.
+  Mapping CHAUSSURES -> bottes dans notre schema DB.
+- FeedbackJournee : affichage 2s apres confirmation depart. Note 1-5 etoiles
+  avec hover anime, commentaire conditionnel si note > 0. Bouton "Passer".
+- Selecteur employe Android : <select> remplace par liste de boutons natifs
+  pour compatibilite Android WebView (emojis + onChange fiables).
+- Responsive mobile : masquage date header <= 640px, grilles en colonne unique.
 - Verification role backend : les routes salaries acceptent pin/code_pin,
   siteId/site_id, heuresHebdo/heures_hebdo (camelCase ET snake_case).
 - Machine a etats : seules les actions logiques sont proposees
@@ -202,22 +358,6 @@ pointages:refresh Server -> Client   Signal rechargement liste pointages
   et active automatiquement le mode simulation.
 - Polling RFID : intervalle 200ms avec anti-rebond (meme UID ignore 2s).
 - WAL mode SQLite : performances optimales sur carte SD.
-
------------------------------------------------------------
-10. TABLES DE LA BASE SQLITE
------------------------------------------------------------
-sites                  Sites geographiques
-salaries               Employes (code_pin, site_id, heures_hebdo, ROLE)
-                       role : 'OPERATEUR' (defaut) | 'COLLECTEUR'
-casques                Stickers RFID RC522 (uid_rfid, num interne)
-badges_managers        Badges RH/admin (uid_rfid, role)
-associations_journ.    Casque du jour (salarie <-> sticker)
-badgeages_reels        Pointages (type_evenement, timestamp, EPI, origine,
-                       heure_corrigee, modifications)
-                       origine : 'badgeuse' | 'pointage' | 'app' | 'correction'
-epi_renouvellements    Signalements equipements a renouveler
-planning               Horaires previsionnels par salarie
-pauses_defaut          Pauses collectives (matin 10h30, midi 12h30)
-admin_comptes          Comptes rh et admin
+- VITE_API_TARGET dans .env.local pour pointer le proxy vers le Pi en dev.
 
 ===========================================================
