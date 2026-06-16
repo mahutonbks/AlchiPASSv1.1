@@ -1,0 +1,9 @@
+{
+  "appId": "com.alchimistes.alchipass",
+  "appName": "AlchiPass",
+  "webDir": "dist",
+  "server": {
+    "url": "http://172.16.144.135:3001",
+    "cleartext": true
+  }
+}

@@ -1,0 +1,41 @@
+Rôle : Agis en tant qu'Expert Full-Stack IoT (Node.js/React/C++). Objectif : Finaliser l'application Alchi'Pass hébergée sur une Raspberry Pi 5. Le système doit coordonner une badgeuse physique complexe et une application web multi-interface avec des règles métiers spécifiques par rôle.
+1. Architecture Technique & Hébergement
+Serveur : L'application est hébergée sur la Raspberry Pi 5 (Node.js/Express).
+Base de données : SQLite (alchipass.db) pour centraliser les données de tous les terminaux
+.
+Badgeuse Physique : Composée d'un Arduino (gestion capteurs), Raspberry Pi 5, Lecteur RFID RC522, Écran LCD et Digicode (Keypad)
+.
+Communication Temps Réel : Utilise Socket.io pour que la badgeuse physique "pousse" instantanément les événements vers l'application web
+.
+2. Workflow de Pointage Physique (Entrée/Sortie/Pauses)
+Toutes ces actions se font sur la badgeuse :
+Identification : Scan du sticker RFID du casque
+.
+Vérification EPI : L'écran LCD de la badgeuse affiche la checklist (Gilet, Bottes, Casque). L'employé valide via le Digicode
+.
+Action : Enregistrement automatique de l'événement (Arrivée, Début/Fin Pause, Départ) dans badgeages_reels
+.
+Synchro : L'info est envoyée au serveur et met à jour instantanément le Dashboard de l'employé s'il est connecté sur son mobile.
+3. Perfectionnement de l'Interface Employé (Mobile)
+L'interface doit être personnelle (Login + PIN) et ultra-visuelle (icônes)
+ :
+Dashboard Personnel : Affiche le statut en temps réel (🔴 Pas arrivé, 🟢 Sur site, 🟡 En pause)
+.
+Règle Métier "Pauses" :
+Pour les Collecteurs : Afficher un bouton numérique "☕ Prendre ma pause" sur l'appli pour permettre le pointage à distance
+.
+Pour les autres employés : Ce bouton est masqué. Ils consultent uniquement leurs horaires et reçoivent des notifications de rappel (Browser Push API) basées sur pauses_defaut
+.
+Planning & Historique : Vues graphiques simplifiées pour consulter les heures travaillées et la conformité EPI passée
+.
+4. Interfaces RH et Admin (Sidebar Responsive)
+RH : Focus sur la paie (Export CSV) et la correction des oublis avec traçabilité (heure_corrigee)
+.
+Admin : Radar de présence en temps réel et monitoring de la conformité EPI sur site
+.
+Sidebar : Doit se réduire en "mini" (icônes seules) sur mobile/tablette pour ne pas gêner la lisibilité
+.
+5. Livrables de code attendus
+Script de communication Hardware (Python/Node) : Lecture RFID + Digicode -> Émission événement Socket.io.
+Logique Backend (Express) : Gestion des rôles (Collecteur vs Employé) pour l'accès aux fonctionnalités de pause.
+Composants React : Dashboard personnel inclusif et Sidebar adaptative.
