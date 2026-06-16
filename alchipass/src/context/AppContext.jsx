@@ -160,6 +160,29 @@ export function AppProvider({ children }) {
     setCasques(prev => prev.map(c => c.id === id ? { ...res, id: res.id_rfid_sticker } : c))
   }
 
+  async function supprimerCasque(id) {
+    await apiFetch(`/casques/${id}`, { method: 'DELETE' })
+    setCasques(prev => prev.filter(c => c.id !== id))
+    setAssociations(prev => prev.filter(a => a.id_rfid_sticker !== id))
+  }
+
+  // ── Badges managers ───────────────────────────────────────────
+
+  async function ajouterBadgeManager(uid_rfid, role, label) {
+    const res = await apiFetch('/casques/badges-managers', {
+      method: 'POST', body: { uid_rfid, role, label },
+    })
+    setBadgesManagers(prev => {
+      const autres = prev.filter(b => b.uid_rfid !== uid_rfid)
+      return [...autres, res]
+    })
+  }
+
+  async function supprimerBadgeManager(uid_rfid) {
+    await apiFetch(`/casques/badges-managers/${encodeURIComponent(uid_rfid)}`, { method: 'DELETE' })
+    setBadgesManagers(prev => prev.filter(b => b.uid_rfid !== uid_rfid))
+  }
+
   // ── Associations journalières ─────────────────────────────────
 
   async function associerCasque(id_salarie, id_rfid_sticker) {
@@ -229,7 +252,8 @@ export function AppProvider({ children }) {
     ajouterPointage, corrigerPointage, ajouterPointageManuel, supprimerPointage,
     ajouterSalarie, modifierSalarie, basculerActifSalarie,
     ajouterSite, definirCreneau,
-    ajouterCasque, modifierCasque, associerCasque,
+    ajouterCasque, modifierCasque, supprimerCasque, associerCasque,
+    ajouterBadgeManager, supprimerBadgeManager,
     modifierPauseDefaut,
     signalerRenouvellementEPI, marquerSignalementTraite,
     ajouterFeedback,

@@ -1,38 +1,3 @@
-Rôle : Agis en tant qu'Expert Développeur Full-Stack spécialisé en intégration IoT (React/Node.js). Objectif : Adapter le frontend React/Vite pour qu'il communique parfaitement avec le server.js (Express/Socket.io) et la base de données alchipass.db fournis par l'équipe hardware pour un déploiement sur Raspberry Pi 5.
-1. Alignement sur la Base de Données (alchipass.db)
-L'application doit désormais consommer exclusivement les données issues de la base SQLite centralisée.
-Synchronisation : Assure-toi que les composants React utilisent les routes API définies dans server.js (ex: /api/salaries, /api/pointages) au lieu du localStorage
-.
-Schéma à respecter : La table badgeages_reels est la source de vérité pour le statut en temps réel, incluant les colonnes epi_gilet, epi_bottes, epi_casque et heure_corrigee pour la traçabilité RH
-.
-2. Intégration Hardware via Socket.io
-Le backend émet des événements en temps réel issus de la badgeuse physique (RFID + Digicode).
-Écouteur global : Implémente un "listener" Socket.io dans le frontend. Lorsqu'un événement de badgeage est reçu :
-L'interface Kiosque doit se mettre à jour instantanément pour afficher la confirmation ou l'étape de validation EPI
-.
-Le Dashboard personnel de l'employé doit refléter son nouveau statut (🟢 Sur site, 🟡 En pause, etc.) sans recharger la page
-.
-3. Logique Métier par Rôle (Interface Employé)
-L'interface mobile doit être une application personnelle (Login + PIN) avec des droits différenciés
- :
-Collecteurs : Afficher le bouton "☕ Prendre ma pause" pour permettre le pointage numérique à distance
-.
-Opérateurs de tri : Masquer le bouton de pause numérique (la pause est gérée par la badgeuse physique). Afficher uniquement le Planning visuel et l'Historique avec les rappels de pause par notification
-.
-Design Inclusif : Conserve l'usage massif d'icônes et d'avatars pour les salariés ayant des difficultés de lecture/écriture
-.
-4. Optimisation des Espaces RH et Admin
-Sidebar Responsive : Sur mobile et tablette, la barre latérale doit passer en mode "mini" (icônes seules, ~64px) et se déployer au clic sur le bouton hamburger ☰
-.
-Fonctionnalités RH : Active la modification des pointages via la modal de correction, en envoyant les données vers PUT /api/pointages/:id pour remplir le champ heure_corrigee
-.
-Radar Admin : L'interface Admin doit filtrer en temps réel les salariés "présents" et afficher leur conformité EPI (✅/⚠️) basée sur le dernier scan RFID
-.
-5. Déploiement sur Raspberry Pi 5
-Configuration Réseau : Les requêtes API doivent pointer vers l'adresse IP de la Raspberry Pi 5 sur le réseau local (ex: http://192.168.x.x:3001)
-.
-Persistance : Configure l'application pour qu'elle utilise le mode WAL de SQLite afin d'optimiser les performances sur la carte SD de la Pi 5
-.
 
 
 Voici ci dessous les données fournies par l'équipe hardware

@@ -33,7 +33,10 @@ router.put('/:id', (req, res) => {
 
 // DELETE /api/casques/:id
 router.delete('/:id', (req, res) => {
-  db.prepare('DELETE FROM casques WHERE id_rfid_sticker=?').run(req.params.id)
+  db.transaction(() => {
+    db.prepare('DELETE FROM associations_journalieres WHERE id_rfid_sticker=?').run(req.params.id)
+    db.prepare('DELETE FROM casques WHERE id_rfid_sticker=?').run(req.params.id)
+  })()
   res.json({ ok: true })
 })
 

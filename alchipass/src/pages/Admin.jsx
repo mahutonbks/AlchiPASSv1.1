@@ -5,6 +5,7 @@
 // =============================================================
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import { BarreHaut } from '../components/Communs'
@@ -874,10 +875,39 @@ function ModalCorrection({ typeLabel, heureActuelle, onConfirmer, onAnnuler }) {
 function GestionCasques({ app }) {
   const {
     casques = [], associations = [], badgesManagers = [],
-    salaries, ajouterCasque, modifierCasque, associerCasque,
+    salaries,
+    ajouterCasque, modifierCasque, supprimerCasque, associerCasque,
+    ajouterBadgeManager, supprimerBadgeManager,
   } = app
   const cleJour = dateKey(new Date())
+
+  // ── États formulaire ajout casque ────────────────────────────
   const [formCasque, setFormCasque] = useState({ uid_rfid: '', num_interne_casque: '', etat: 'actif' })
+
+  // ── États édition inline casque ───────────────────────────────
+  const [enEditionCasque, setEnEditionCasque] = useState(null)  // id du casque en cours d'édition
+  const [valsCasque, setValsCasque] = useState({})
+
+  // ── États formulaire ajout badge manager ──────────────────────
+  const FORM_BADGE_VIDE = { uid_rfid: '', role: 'rh', label: '' }
+  const [formBadge, setFormBadge] = useState(FORM_BADGE_VIDE)
+  const [ajoutBadgeOuvert, setAjoutBadgeOuvert] = useState(false)
+
+  // ── États édition inline badge manager ────────────────────────
+  const [enEditionBadge, setEnEditionBadge] = useState(null)  // uid_rfid original du badge édité
+  const [valsBadge, setValsBadge] = useState({})
+
+  // ── Modal de confirmation ────────────────────────────────────
+  // Le state stocke l'intention (quoi supprimer), pas une fonction.
+  // { type: 'casque'|'badge', id?, uid?, titre, message }
+  const [confirm, setConfirm] = useState(null)
+
+  async function executerSuppression() {
+    if (!confirm) return
+    if (confirm.type === 'casque') await supprimerCasque(confirm.id)
+    else if (confirm.type === 'badge') await supprimerBadgeManager(confirm.uid)
+    setConfirm(null)
+  }
 
   const nomSalarie = (id) => {
     const s = salaries.find((x) => x.id === id)
@@ -893,6 +923,7 @@ function GestionCasques({ app }) {
     inactif:     { label: 'Inactif',     couleur: 'var(--texte-doux)' },
   }
 
+  // ── Handlers casques ─────────────────────────────────────────
   function soumettreNouveauCasque(e) {
     e.preventDefault()
     if (!formCasque.uid_rfid || !formCasque.num_interne_casque) return
@@ -900,23 +931,181 @@ function GestionCasques({ app }) {
     setFormCasque({ uid_rfid: '', num_interne_casque: '', etat: 'actif' })
   }
 
+  function ouvrirEditionCasque(c) {
+    setEnEditionCasque(c.id)
+    setValsCasque({ uid_rfid: c.uid_rfid, num_interne_casque: c.num_interne_casque, etat: c.etat })
+  }
+
+  function sauvegarderCasque(id) {
+    if (!valsCasque.uid_rfid || !valsCasque.num_interne_casque) return
+    modifierCasque(id, valsCasque)
+    setEnEditionCasque(null)
+  }
+
+  function confirmerSuppressionCasque(c) {
+    const assoc = assocDuJour(c.id)
+    const message = assoc
+      ? `Le casque ${c.num_interne_casque} est actuellement assigné à ${nomSalarie(assoc.id_salarie)}. L'association du jour sera également supprimée.`
+      : `Le casque ${c.num_interne_casque} (${c.uid_rfid}) sera définitivement supprimé.`
+    setConfirm({ type: 'casque', id: c.id, titre: `Supprimer le casque ${c.num_interne_casque} ?`, message })
+  }
+
+  // ── Handlers badges managers ─────────────────────────────────
+  function soumettreNouveauBadge(e) {
+    e.preventDefault()
+    if (!formBadge.uid_rfid || !formBadge.label) return
+    ajouterBadgeManager(formBadge.uid_rfid.toUpperCase(), formBadge.role, formBadge.label)
+    setFormBadge(FORM_BADGE_VIDE)
+    setAjoutBadgeOuvert(false)
+  }
+
+  function ouvrirEditionBadge(b) {
+    setEnEditionBadge(b.uid_rfid)
+    setValsBadge({ uid_rfid: b.uid_rfid, role: b.role, label: b.label })
+    setAjoutBadgeOuvert(false)
+  }
+
+  async function sauvegarderBadge() {
+    if (!valsBadge.uid_rfid || !valsBadge.label) return
+    const nouvelUid = valsBadge.uid_rfid.toUpperCase()
+    // Si l'UID a changé, supprimer l'ancien avant d'insérer le nouveau
+    if (nouvelUid !== enEditionBadge) {
+      await supprimerBadgeManager(enEditionBadge)
+    }
+    await ajouterBadgeManager(nouvelUid, valsBadge.role, valsBadge.label)
+    setEnEditionBadge(null)
+  }
+
+  // ── Style partagé pour les lignes en édition ─────────────────
+  const styleEdition = { background: 'var(--vert-clair)', outline: '2px solid var(--vert)' }
+  const styleInputEdition = { padding: '5px 8px', borderRadius: 10, fontSize: 13,
+                               border: '1.5px solid var(--bordure)', width: '100%' }
+
   return (
     <div className="grille" style={{ gap: 18 }}>
+      {confirm && (
+        <ModalConfirmation
+          titre={confirm.titre}
+          message={confirm.message}
+          onConfirm={executerSuppression}
+          onAnnuler={() => setConfirm(null)}
+        />
+      )}
+
       <h2 style={{ margin: 0 }}>Casques & Badgeuse RFID</h2>
 
-      {/* Badges managers */}
+      {/* ── Badges managers ── */}
       <div className="carte">
-        <h2>Badges managers (cartes d'accès)</h2>
+        <div className="flex between" style={{ marginBottom: 12 }}>
+          <h2 style={{ margin: 0 }}>Badges managers (cartes d'accès)</h2>
+          <button className="btn mini" onClick={() => { setAjoutBadgeOuvert(v => !v); setEnEditionBadge(null) }}>
+            {ajoutBadgeOuvert ? '✕ Annuler' : '+ Ajouter'}
+          </button>
+        </div>
+
+        {/* Formulaire ajout badge */}
+        {ajoutBadgeOuvert && (
+          <form onSubmit={soumettreNouveauBadge}
+            style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 16,
+                     padding: '14px 16px', background: 'var(--fond)', borderRadius: 14,
+                     border: '1.5px solid var(--bordure)' }}>
+            <div className="champ" style={{ margin: 0, flex: '1 1 160px' }}>
+              <label>UID RFID</label>
+              <input
+                placeholder="ex : 04ABCDEF1234"
+                value={formBadge.uid_rfid}
+                onChange={e => setFormBadge({ ...formBadge, uid_rfid: e.target.value.toUpperCase() })}
+                required
+              />
+            </div>
+            <div className="champ" style={{ margin: 0, flex: '0 0 110px' }}>
+              <label>Rôle</label>
+              <select value={formBadge.role} onChange={e => setFormBadge({ ...formBadge, role: e.target.value })}>
+                <option value="rh">RH</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div className="champ" style={{ margin: 0, flex: '1 1 160px' }}>
+              <label>Label (nom de la carte)</label>
+              <input
+                placeholder="ex : Carte RH Marie"
+                value={formBadge.label}
+                onChange={e => setFormBadge({ ...formBadge, label: e.target.value })}
+                required
+              />
+            </div>
+            <button className="btn" type="submit" style={{ marginBottom: 2 }}>Enregistrer</button>
+          </form>
+        )}
+
         <table>
-          <thead><tr><th>Rôle</th><th>Label</th><th>UID RFID</th></tr></thead>
+          <thead>
+            <tr><th>Rôle</th><th>Label</th><th>UID RFID</th><th></th></tr>
+          </thead>
           <tbody>
-            {badgesManagers.map((b) => (
-              <tr key={b.uid_rfid}>
-                <td><span className={`role-badge-mini ${b.role}`}>{b.role === 'rh' ? '👤 RH' : '🔐 Admin'}</span></td>
-                <td>{b.label}</td>
-                <td><code>{b.uid_rfid}</code></td>
-              </tr>
-            ))}
+            {badgesManagers.length === 0 && (
+              <tr><td colSpan={4} className="muet" style={{ textAlign: 'center', padding: 16 }}>Aucun badge manager enregistré</td></tr>
+            )}
+            {badgesManagers.map((b) => {
+              const enEdition = enEditionBadge === b.uid_rfid
+              return (
+                <tr key={b.uid_rfid} style={enEdition ? styleEdition : {}}>
+                  {enEdition ? (
+                    <>
+                      <td>
+                        <select
+                          style={{ ...styleInputEdition, width: 90 }}
+                          value={valsBadge.role}
+                          onChange={e => setValsBadge({ ...valsBadge, role: e.target.value })}
+                        >
+                          <option value="rh">👤 RH</option>
+                          <option value="admin">🔐 Admin</option>
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          style={styleInputEdition}
+                          value={valsBadge.label}
+                          onChange={e => setValsBadge({ ...valsBadge, label: e.target.value })}
+                          placeholder="Label"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          style={styleInputEdition}
+                          value={valsBadge.uid_rfid}
+                          onChange={e => setValsBadge({ ...valsBadge, uid_rfid: e.target.value.toUpperCase() })}
+                          placeholder="UID RFID"
+                        />
+                      </td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <button className="btn mini" style={{ marginRight: 6 }} onClick={sauvegarderBadge}>✓ Sauvegarder</button>
+                        <button className="btn gris mini" onClick={() => setEnEditionBadge(null)}>Annuler</button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td><span className={`role-badge-mini ${b.role}`}>{b.role === 'rh' ? '👤 RH' : '🔐 Admin'}</span></td>
+                      <td>{b.label}</td>
+                      <td><code style={{ fontSize: 11 }}>{b.uid_rfid}</code></td>
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        <button className="btn gris mini" style={{ marginRight: 6 }} onClick={() => ouvrirEditionBadge(b)}>Modifier</button>
+                        <button
+                          className="btn rouge mini"
+                          onClick={() => setConfirm({
+                            type: 'badge', uid: b.uid_rfid,
+                            titre: `Supprimer le badge "${b.label}" ?`,
+                            message: `La carte ${b.role.toUpperCase()} (UID : ${b.uid_rfid}) sera définitivement retirée. Elle ne permettra plus d'accéder à l'espace manager.`,
+                          })}
+                        >
+                          Supprimer
+                        </button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
         <p className="muet" style={{ fontSize: 12, marginTop: 10 }}>
@@ -924,7 +1113,7 @@ function GestionCasques({ app }) {
         </p>
       </div>
 
-      {/* Associations du jour */}
+      {/* ── Associations du jour ── */}
       <div className="carte">
         <h2>Associations du jour — {new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
         <p className="muet" style={{ marginTop: -6 }}>Assigne un casque à chaque salarié présent aujourd'hui.</p>
@@ -961,7 +1150,7 @@ function GestionCasques({ app }) {
         </table>
       </div>
 
-      {/* Inventaire des casques */}
+      {/* ── Inventaire des casques ── */}
       <div className="grille grille-form" style={{ alignItems: 'start' }}>
         <div className="carte">
           <h2>Ajouter un casque</h2>
@@ -988,39 +1177,112 @@ function GestionCasques({ app }) {
 
         <div className="carte">
           <h2>Inventaire ({casques.length} casques)</h2>
-          <table>
-            <thead><tr><th>N° interne</th><th>UID RFID</th><th>État</th><th></th></tr></thead>
-            <tbody>
-              {casques.map((c) => {
-                const assoc = assocDuJour(c.id)
-                const etatInfo = ETATS_CASQUE[c.etat] || ETATS_CASQUE.inactif
-                return (
-                  <tr key={c.id}>
-                    <td><strong>{c.num_interne_casque}</strong></td>
-                    <td><code style={{ fontSize: 11 }}>{c.uid_rfid}</code></td>
-                    <td>
-                      <select
-                        style={{ padding: '5px 8px', borderRadius: 10, fontSize: 13,
-                                 border: '1.5px solid var(--bordure)', color: etatInfo.couleur }}
-                        value={c.etat}
-                        onChange={(e) => modifierCasque(c.id, { etat: e.target.value })}
-                      >
-                        {Object.entries(ETATS_CASQUE).map(([k, v]) => (
-                          <option key={k} value={k}>{v.label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="muet" style={{ fontSize: 12 }}>
-                      {assoc ? `→ ${nomSalarie(assoc.id_salarie)}` : '—'}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+          <div style={{ overflowX: 'auto' }}>
+            <table>
+              <thead>
+                <tr><th>N° interne</th><th>UID RFID</th><th>État</th><th>Assigné à</th><th></th></tr>
+              </thead>
+              <tbody>
+                {casques.map((c) => {
+                  const assoc = assocDuJour(c.id)
+                  const etatInfo = ETATS_CASQUE[c.etat] || ETATS_CASQUE.inactif
+                  const enEdition = enEditionCasque === c.id
+                  return (
+                    <tr key={c.id} style={enEdition ? styleEdition : {}}>
+                      {enEdition ? (
+                        <>
+                          <td>
+                            <input
+                              style={styleInputEdition}
+                              value={valsCasque.num_interne_casque}
+                              onChange={e => setValsCasque({ ...valsCasque, num_interne_casque: e.target.value })}
+                              placeholder="N° interne"
+                            />
+                          </td>
+                          <td>
+                            <input
+                              style={styleInputEdition}
+                              value={valsCasque.uid_rfid}
+                              onChange={e => setValsCasque({ ...valsCasque, uid_rfid: e.target.value.toUpperCase() })}
+                              placeholder="UID RFID"
+                            />
+                          </td>
+                          <td>
+                            <select
+                              style={{ ...styleInputEdition, color: ETATS_CASQUE[valsCasque.etat]?.couleur }}
+                              value={valsCasque.etat}
+                              onChange={e => setValsCasque({ ...valsCasque, etat: e.target.value })}
+                            >
+                              {Object.entries(ETATS_CASQUE).map(([k, v]) => (
+                                <option key={k} value={k}>{v.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="muet" style={{ fontSize: 12 }}>
+                            {assoc ? nomSalarie(assoc.id_salarie) : '—'}
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <button className="btn mini" style={{ marginRight: 6 }} onClick={() => sauvegarderCasque(c.id)}>✓ Sauvegarder</button>
+                            <button className="btn gris mini" onClick={() => setEnEditionCasque(null)}>Annuler</button>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td><strong>{c.num_interne_casque}</strong></td>
+                          <td><code style={{ fontSize: 11 }}>{c.uid_rfid}</code></td>
+                          <td>
+                            <select
+                              style={{ padding: '5px 8px', borderRadius: 10, fontSize: 13,
+                                       border: '1.5px solid var(--bordure)', color: etatInfo.couleur }}
+                              value={c.etat}
+                              onChange={(e) => modifierCasque(c.id, { etat: e.target.value })}
+                            >
+                              {Object.entries(ETATS_CASQUE).map(([k, v]) => (
+                                <option key={k} value={k}>{v.label}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="muet" style={{ fontSize: 12 }}>
+                            {assoc ? nomSalarie(assoc.id_salarie) : '—'}
+                          </td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <button className="btn gris mini" style={{ marginRight: 6 }} onClick={() => ouvrirEditionCasque(c)}>Modifier</button>
+                            <button className="btn rouge mini" onClick={() => confirmerSuppressionCasque(c)}>Supprimer</button>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
+  )
+}
+
+// =============================================================
+//  MODAL DE CONFIRMATION (remplace window.confirm)
+// =============================================================
+function ModalConfirmation({ titre, message, labelConfirm = 'Supprimer', onConfirm, onAnnuler }) {
+  return createPortal(
+    <div className="modal-overlay" onClick={onAnnuler}>
+      <div className="modal-conteneur" onClick={e => e.stopPropagation()}>
+        <div className="modal-entete">
+          <h3>{titre}</h3>
+        </div>
+        <div className="modal-corps">
+          <p style={{ margin: 0, color: 'var(--texte)', lineHeight: 1.6 }}>{message}</p>
+        </div>
+        <div className="modal-pied">
+          <button className="modal-annuler" onClick={onAnnuler}>Annuler</button>
+          <button className="modal-valider rouge" onClick={onConfirm}>{labelConfirm}</button>
+        </div>
+      </div>
+    </div>,
+    document.body
   )
 }
 
