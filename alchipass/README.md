@@ -76,9 +76,10 @@ connecte avec son nom + code PIN et accède à son espace individuel.
 - **Présence en temps réel** sur site, filtrée par site
 - **Conformité EPI** : tableau par salarié avec statut ✅ / ⚠️ basé sur les
   EPI validés à la dernière arrivée
-- **Casques & RFID** : inventaire des stickers RC522, associations
-  journalières salarié ↔ casque, gestion des états (actif / défectueux /
-  inactif), badges managers
+- **Casques & RFID** : inventaire des stickers RC522 avec CRUD complet
+  (ajout, **édition inline** des champs UID/numéro/état, suppression avec
+  confirmation), associations journalières salarié ↔ casque, gestion des
+  badges managers (ajout, édition inline UID/label/rôle, suppression)
 - **Signalement de renouvellement** : enregistrement et suivi des
   équipements à remplacer
 - **Feedbacks salariés** : tableau des notes (1–5 étoiles) avec commentaires,
@@ -521,6 +522,28 @@ La base SQLite est auto-initialisée avec :
   (`/api/badge`, `/api/authentifier`, `/api/evenement`) permettent au script Python
   du Pi de communiquer avec le serveur Node.js. Les actions EPI sont accumulées
   en mémoire entre les appels, le pointage n'est créé qu'à `CONNEXION_CASQUE_VALIDE`.
+- **Compatibilité Raspberry Pi 5** : `mfrc522-rpi` / WiringPi sont incompatibles
+  avec le chip RP1 du Pi 5. Le script Python RFID (`spidev`) est la seule voie
+  matérielle fonctionnelle sur Pi 5 ; AlchiPass sert de backend API via le
+  hardware bridge. Les messages « simulation mode » dans les logs serveur sont
+  attendus et inoffensifs.
+- **Suppression casques avec contrainte FK** : `foreign_keys = ON` en SQLite.
+  La suppression d'un casque s'effectue dans une transaction qui efface d'abord
+  les `associations_journalieres` correspondantes avant de supprimer le casque,
+  évitant toute violation de clé étrangère.
+- **Modal de confirmation** (`ModalConfirmation`) : rendu via `createPortal`
+  vers `document.body` pour échapper aux parents `overflow-y: auto`, avec
+  `position: fixed`, `backdrop-filter: blur`, `max-height: calc(100dvh - 32px)`
+  et animation pop responsive.
+- **Édition inline casques & badges managers** : chaque ligne du tableau passe
+  en mode édition (inputs `num_interne_casque`, `uid_rfid`, `etat`/`role`,
+  `label`) sans navigation. Un bouton Sauvegarder appelle `PUT` (casque) ou
+  `DELETE` + `POST` si l'UID a changé (badge manager).
+- **Confirm modal — pattern intent** : l'état de confirmation stocke
+  `{ type: 'casque'|'badge', id?, uid? }` plutôt qu'une fonction callback,
+  pour éviter les closures périmées dans `useState`. La fonction
+  `executerSuppression()` est définie dans le composant avec une closure fraîche
+  à chaque render.
 - **Feedback journée** (`FeedbackJournee` dans `Kiosque.jsx`) : composant affiché
   2 s après un départ. Note 0–5 avec hover animé, commentaire conditionnel.
   Entièrement optionnel (bouton "Passer"). Consultable dans Admin → Feedbacks.

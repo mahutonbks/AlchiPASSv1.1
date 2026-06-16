@@ -337,6 +337,25 @@ Hardware bridge (script Python Pi) :
 - Hardware bridge hardware.js : les 3 endpoints Pi accumulent les EPI en
   memoire entre les appels. Pointage cree uniquement a CONNEXION_CASQUE_VALIDE.
   Mapping CHAUSSURES -> bottes dans notre schema DB.
+- Compatibilite Raspberry Pi 5 : mfrc522-rpi / WiringPi sont incompatibles
+  avec le chip RP1 du Pi 5. Seul le script Python RFID (spidev) fonctionne
+  en hardware sur Pi 5. Les messages "simulation mode" dans les logs sont
+  attendus et inoffensifs sur Pi 5.
+- CRUD complet casques & badges managers : ajout, edition inline dans le
+  tableau (UID, numero, etat, label, role), suppression avec modal de
+  confirmation. Si l'UID d'un badge manager est modifie, l'ancien enregistrement
+  est supprime et un nouveau est insere (contrainte PK uid_rfid).
+- Suppression casques (FK SQLite) : foreign_keys = ON est actif. La suppression
+  d'un casque utilise une transaction qui efface d'abord les
+  associations_journalieres concernees, puis le casque, pour eviter la
+  violation de cle etrangere.
+- Modal de confirmation (ModalConfirmation) : rendu via createPortal vers
+  document.body pour echapper aux parents overflow-y: auto. position: fixed,
+  backdrop-filter: blur, max-height: calc(100dvh - 32px), animation pop.
+- Confirm modal - pattern intent : l'etat stocke { type, id, uid } plutot
+  qu'une fonction callback pour eviter les closures perimees dans useState.
+  executerSuppression() lit le type et appelle la bonne fonction avec une
+  closure fraiche a chaque render.
 - FeedbackJournee : affichage 2s apres confirmation depart. Note 1-5 etoiles
   avec hover anime, commentaire conditionnel si note > 0. Bouton "Passer".
 - Selecteur employe Android : <select> remplace par liste de boutons natifs
